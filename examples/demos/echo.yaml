@@ -1,0 +1,37 @@
+name: echo
+
+trigger:
+  type: http
+  path: /echo
+
+jobs:
+  - name: echo-1
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/takuhai-echo:latest
+      - type: shell
+        arch: arm
+        image: ./echo.sh
+      - type: shell
+        arch: amd64
+        image: ./echo-amd64.sh
+  - name: echo-2
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/takuhai-echo:latest
+      - type: shell
+        arch: arm
+        image: ./echo.sh
+      - type: shell
+        arch: amd64
+        image: ./echo-amd64.sh
+
+steps:
+  - name: echo-1-step
+    jobName: echo-1
+    place: edge
+  - name: echo-2-step
+    jobName: echo-2
+    after: echo-1-step

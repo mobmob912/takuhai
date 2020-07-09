@@ -1,0 +1,27 @@
+name: tamabus-bus-image  # ワークフロー名
+trigger:  # 何を起点にワークフローを開始するか
+  type: http  # 外部からHTTPで叩けるAPIとして公開する
+  path: /busimage  # HTTPで叩くAPIのパス
+flow-input: bus-image  # ジョブへ最初に入力されるデータ名
+flow:  # ワークフローを記述する
+- name: compress-bus-image  # ジョブ名
+  image: tockn/compress-image:latest  # ジョブとして実行するdocker image
+  input: bus-image  # 入力とするデータ名
+  output: compressed-bus-image # 出力されるデータ名
+  place: edge  # Edgeで実行するかCloudで実行するか
+- name: store-bus-image
+  image: tockn/store-bus-data:latest
+  input: compressed-bus-image
+  place: edge
+- name: congestion-calculator
+  image: tockn/congestion-calculator:latest
+  limits:  # ジョブ稼働に要求されるリソース
+    memory: 1Gi
+    cpu: 100Mhz
+  input: compressed-bus-image
+  output: congestion
+  place: cloud
+- name: store-congestion
+  image: tockn/store-bus-data:latest
+  input: congestion
+  place: cloud

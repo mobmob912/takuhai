@@ -1,0 +1,28 @@
+name: network-monitoring
+
+trigger:
+  type: http
+  path: /network
+
+jobs:
+  - name: receive-rssi
+    images:
+      - type: shell
+        arch: arm
+        image: ./receive-rssi.sh
+  - name: store-log
+    images:
+      - type: shell
+        arch: amd64
+        image: ./store-log.sh
+
+steps:
+  - name: receive-rssi-step
+    jobName: receive-rssi
+    place: edge
+  - name: store-log-step
+    jobName: store-log
+    labels:
+      - log-db
+    place: cloud
+    after: receive-rssi-step

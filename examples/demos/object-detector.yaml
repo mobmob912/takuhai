@@ -1,0 +1,51 @@
+name: object-detector
+
+trigger:
+  type: http
+  path: /detect
+
+jobs:
+  - name: generate-image-id
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/generate-image-id:latest
+      - type: shell
+        arch: arm
+        image: ./generate-data-id.sh
+  - name: object-detect
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/object-detector:latest
+  - name: store-result
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/store-detection-result:latest
+  - name: store-image
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/store-image:latest
+
+steps:
+  - name: generate-image-id-step
+    jobName: generate-image-id
+    place: edge
+  - name: store-image-step
+    jobName: store-image
+    labels:
+      - db
+    after: generate-image-id-step
+
+  - name: object-detect-step
+    jobName: object-detect
+    place: any
+    after: generate-image-id-step
+  - name: store-result-step
+    jobName: store-result
+    labels:
+      - db
+    after: object-detect-step
+

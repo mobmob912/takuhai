@@ -1,0 +1,59 @@
+name: object-detector
+
+trigger:
+  type: http
+  path: /detect
+
+jobs:
+  - name: image-processing
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/image-processing:latest
+      - type: shell
+        arch: arm
+        image: ./image-processing.sh
+  - name: object-detect
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/object-detector:latest
+  - name: store-result
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/store-detection-result:latest
+      - type: shell
+        arch: amd64
+        image: ./store-detection-result.sh
+  - name: store-image
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/store-image:latest
+      - type: shell
+        arch: amd64
+        image: ./store-image.sh
+
+steps:
+  - name: image-processing-step
+    jobName: image-processing
+    place: edge
+
+  - name: store-image-step
+    jobName: store-image
+    labels:
+      - db
+    after: image-processing-step
+
+  - name: object-detect-step
+    jobName: object-detect
+    place: any
+    after: image-processing-step
+
+  - name: store-result-step
+    jobName: store-result
+    labels:
+      - db
+    after: object-detect-step
+

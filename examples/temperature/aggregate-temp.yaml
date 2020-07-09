@@ -1,0 +1,31 @@
+name: aggregate-temperature
+
+trigger:
+  type: http
+  path: /temperature
+
+jobs:
+  - name: receive-temperature
+    images:
+      - type: shell
+        arch: amd64
+        image: ./receive-temperature.sh
+      - type: shell
+        arch: arm
+        image: ./receive-temperature-arm.sh
+  - name: aggregate
+    images:
+      - type: shell
+        arch: amd64
+        image: ./aggregate.sh
+
+steps:
+  - name: receive-temperature-step
+    jobName: receive-temperature
+    place: edge
+  - name: aggregate-step
+    jobName: aggregate
+    labels:
+      - log-db
+    place: cloud
+    after: receive-temperature-step

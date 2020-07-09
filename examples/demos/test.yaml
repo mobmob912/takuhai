@@ -1,0 +1,39 @@
+name: double-echo
+trigger:
+  type: http
+  path: /test
+jobs:
+  - name: echo-1
+    images:
+      - type: container
+        arch: amd64
+        image: tockn/takuhai-echo:latest
+      - type: container
+        arch: arm
+        image: tockn/takuhai-echo:arm-latest
+      - type: shell
+        arch: arm,amd64
+        image: ./rasp.sh
+    place: any
+  - name: echo-2
+    images:
+      - type: container
+        arch: amd64
+        image: tockn/takuhai-echo:latest
+      - type: container
+        arch: arm
+        image: tockn/takuhai-echo:arm-latest
+    place: cloud
+  - name: fail-echo
+    images:
+      - type: container
+        arch: amd64
+        image: tockn/takuhai-echo:latest
+    place: any
+steps:
+  - jobName: echo-1
+    failure:
+      - jobName: fail-echo
+  - jobName: echo-2
+    failure:
+      - jobName: fail-echo

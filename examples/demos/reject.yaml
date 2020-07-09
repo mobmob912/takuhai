@@ -1,0 +1,5 @@
+version: 1.0
+
+image: nginx:latest
+minRAM: 100000000 #(MB)
+minCPU: 100000000 #(Mhz)

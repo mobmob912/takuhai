@@ -1,0 +1,29 @@
+name: analyze-camera
+trigger:
+  type: cron
+  schedule: 10seconds
+flow:
+  - name: get-camera-image
+    image: tockn/get-camera-image:latest
+    vm: get-camera-image.iso
+    output: camera-image
+    place: device
+    label: with-camera
+  - name: store-camera-image
+    image: tockn/store-camera-image:latest
+    input: camera-image
+    place: edge
+  - name: analyze-image
+    image: tockn/analyze-image:latest
+    input: camera-image
+    output: analyzed-data
+    place: any
+  - name: store-analyzed-data
+    image: tockn/store-analyzed-data:latest
+    input: analyzed-data
+    place: any
+  - name: test
+    image: tockn/takuhai-job-test-0:latest
+    input: msg
+    output: msg
+    place: any

@@ -1,0 +1,50 @@
+name: tamabus
+
+trigger:
+  type: http
+  path: /tamabus
+
+jobs:
+  - name: generate-data-id
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/tamabus-generate-data-id:latest
+      - type: shell
+        arch: arm
+        image: ./tamabus-generate-data-id.sh
+  - name: congestion-detect
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/tamabus-congestion-detector:latest
+  - name: store-result
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/tamabus-store-congestion-result:latest
+  - name: store-bus-data
+    images:
+      - type: docker
+        arch: amd64
+        image: tockn/tamabus-store-bus-data:latest
+
+steps:
+  - name: generate-data-id-step
+    jobName: generate-data-id
+    place: edge
+  - name: store-bus-data-step
+    jobName: store-bus-data
+    labels:
+      - db
+    after: generate-data-id-step
+
+  - name: congestion-detect-step
+    jobName: congestion-detect
+    place: any
+    after: generate-data-id-step
+  - name: store-result-step
+    jobName: store-result
+    labels:
+      - db
+    after: congestion-detect-step
