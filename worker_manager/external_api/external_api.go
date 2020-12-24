@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"time"
+	"bytes"
 	"net/http"
 
 	"github.com/mobmob912/takuhai/worker_manager/worker"
@@ -21,7 +23,18 @@ type Server interface {
 	Serve() error
 	IsServing() bool
 }
+type WorkerResponse struct {
+	Time time.Time
+}
+type AddWorkerReply struct {
+	Time time.Duration `json:"time"`
+}
 
+func sendResponse(w http.ResponseWriter, status int, body []byte) {
+	w.WriteHeader(status)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
 type server struct {
 	// TODO workflowStoreやjobStoreでごにょごにょするのはworkerServiceの責務
 	workflowStore store.Workflow
@@ -54,8 +67,11 @@ func (s *server) Serve() error {
 	//// jobをデプロイする from master
 	//r.Post("/workflows/{workflowID}/steps/{stepID}/deploy", s.deployJob)
 
+	r.Post("/reply", s.replyToWorkerWorker)
 	// ワークフロー内の特定のタスクを実行する masterから叩かれる
 	r.Post("/workflows/{workflowID}/steps/{stepID}", s.runJob)
+	
+	r.Post("/register", s.registerWorker)
 
 	// Masterからワークフロー情報更新で叩かれる
 	r.Put("/workflows", s.updateWorkflows)
@@ -92,6 +108,7 @@ func (s *server) startWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) runJob(w http.ResponseWriter, r *http.Request) {
+	//attime := time.Now() 
 	ctx := r.Context()
 	workflowID := chi.URLParam(r, "workflowID")
 	stepID := chi.URLParam(r, "stepID")
@@ -104,7 +121,13 @@ func (s *server) runJob(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err, http.StatusInternalServerError)
 		return
 	}
-	respondSuccess(w, http.StatusCreated, nil)
+	/*res := WorkerResponse{Time: attime}
+	reBody, err := json.Marshal(res)
+	 if err != nil {
+		sendResponse(w, http.StatusInternalServerError, nil)
+	}
+	sendResponse(w, http.StatusCreated, reBody)*/
+	respondSuccess(w, http.StatusNoContent, nil)
 }
 
 func (s *server) updateWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -144,4 +167,56 @@ func (s *server) listStepStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondSuccess(w, http.StatusOK, ss)
+}
+func (s *server) registerWorker(w http.ResponseWriter, r *http.Request) {
+	//ctx := r.Context()
+	var flows worker.ToNode
+	if err := json.NewDecoder(r.Body).Decode(&flows); err != nil {
+		respondError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.workerService.OtherWorkers = append(s.workerService.OtherWorkers,flows)
+	for _, f :=  range s.workerService.OtherWorkers {
+		log.Println(f.ID)	
+		log.Println(f.Name)	
+	}
+	log.Println("Register worker")
+	reqBody2, err := json.Marshal(flows)
+	if err != nil {
+		respondError(w, err, http.StatusInternalServerError)
+		return
+	}
+	req2, err := http.NewRequest("POST", flows.URL.String()+"/reply", bytes.NewReader(reqBody2))
+	if err != nil {
+		respondError(w, err, http.StatusInternalServerError)
+		return
+	}
+	client := http.DefaultClient
+	start := time.Now() 
+	
+	_, err = client.Do(req2)
+	if err != nil {
+	respondError(w, err, http.StatusInternalServerError)
+		return 
+	}
+	delay := time.Since(start)
+	res3 := AddWorkerReply{Time: delay}
+	resBody3, err := json.Marshal(res3)
+	log.Println(string(resBody3))
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, nil)
+	}
+	sendResponse(w, http.StatusCreated, resBody3)
+	
+}
+
+func (s *server)replyToWorkerWorker(w http.ResponseWriter, r *http.Request) {
+        rebody :="hello" 
+        reBody, err := json.Marshal(rebody)
+        if err != nil {
+		sendResponse(w, http.StatusInternalServerError, nil)
+	}
+	sendResponse(w, http.StatusCreated, reBody)
+	return 
+
 }
