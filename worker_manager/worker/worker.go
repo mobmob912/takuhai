@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"io/ioutil"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -31,9 +32,28 @@ import (
 	"github.com/shirou/gopsutil/mem"
 	"github.com/mobmob912/takuhai/master/api"
 )
-
+var nowstep *domain.Step
 type MasterInfo struct {
 	URL *url.URL
+}
+type WorkerResponse struct {
+	Time time.Time
+}
+type ToWorker struct {
+	Name string
+	Time time.Duration
+
+}
+type WorkerResponse2 struct {
+	FromID string
+	ToWorkers []ToWorker
+}
+
+
+type ToNode  struct {
+	ID   string
+	Name string
+	URL  *url.URL 
 }
 
 // TODO: interfaceにしてもイイかも
@@ -43,6 +63,7 @@ type Worker struct {
 	Arch          domain.ArchType
 	Place         domain.Place
 	Labels        []string
+	OtherWorkers  []ToNode
 	MasterInfo    *MasterInfo
 	LocalIPAddr   *net.IP
 	Errors        []error
@@ -60,6 +81,13 @@ type OptionsNew struct {
 	JobStore      store.Job
 	WorkflowStore store.Workflow
 }
+type Content struct {
+	Body           []byte        
+	Runtime        time.Duration
+	RAM         float64
+	CPU         float64
+	
+}
 
 func New(opts *OptionsNew) *Worker {
 	return &Worker{
@@ -68,6 +96,7 @@ func New(opts *OptionsNew) *Worker {
 		Arch:          opts.Arch,
 		Place:         opts.Place,
 		Labels:        opts.Labels,
+		OtherWorkers:   nil,
 		MasterInfo:    opts.MasterInfo,
 		LocalIPAddr:   opts.IPAddr,
 		Errors:        nil,
@@ -280,8 +309,57 @@ func (w *Worker) NextJob(ctx context.Context, workflowID, currentStepID, current
 		return err
 	}
 	nextSteps := wf.NextStepsByCurrentStepID(currentStepID)
+	nowstep = wf.StepByCurrentStepID(currentStepID)
 	// TODO workflowが終了した時
-	if len(nextSteps) == 0 {
+	if len(nextSteps) == 0 {	
+	wkr := &Content{}
+	if err = json.Unmarshal(body, wkr); err != nil {
+		return err
+		
+	}
+	rbody := wkr.Body
+	log.Println(string(rbody))
+	log.Printf("worker runtime")
+	log.Println(wkr.Runtime)
+	log.Printf("worker ram")
+	log.Println(wkr.RAM)
+	log.Printf("worker cpu")
+	log.Println(wkr.CPU)
+	
+	
+	var delay time.Duration 
+	delay = 0
+	log.Println("Come4!!")
+	
+    	log.Println(delay)
+    	c := http.DefaultClient
+	u := *w.MasterInfo.URL
+    	
+	info := &api.DelayInfo {
+	JobName:      nowstep.Name,
+	FromWorkerID: w.ID,
+	ToWorkerName: "Home",
+	RAM:          wkr.RAM,
+	CPU:          wkr.CPU,
+	Runtime:      wkr.Runtime,
+	Time:         delay,
+	}
+		reqBody, err := json.Marshal(&info)
+		
+		if err != nil {
+		return  err
+	}
+
+	u.Path = fmt.Sprintf("/delayinfo")
+	
+	req2, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(reqBody))
+	if err != nil {
+		return  err
+	}
+	_, err = c.Do(req2)
+	if err != nil {
+		return  err
+	}
 		log.Println("\n\n\nworkflow end\n\n\n")
 		return nil
 	}
@@ -291,17 +369,55 @@ func (w *Worker) NextJob(ctx context.Context, workflowID, currentStepID, current
 	for _, s := range nextSteps {
 		s := s
 		eg.Go(func() error {
+		
 			return w.requestDoStep(ctx, workflowID, s, body)
 		})
 	}
 	return eg.Wait()
 }
+func (w *Worker) PeriodicGetWorkerLatency(ctx context.Context) {
+for {
+	time.Sleep(10 * time.Second)
+	client := http.DefaultClient
+	var send WorkerResponse2
+	send.FromID = w.ID
+    for _ , i := range w.OtherWorkers {
+	 	fmt.Println(i.Name)
+		var addwo ToWorker
+		var flows string ="hello"
+		reqBody2, _ := json.Marshal(flows)
+	
+	req2, _ := http.NewRequest("POST", i.URL.String()+"/reply", bytes.NewReader(reqBody2))
+	
+	start := time.Now() 
+	res, _ := client.Do(req2)
+	
+	delay := time.Since(start)
+	resBody, _ := ioutil.ReadAll(res.Body)
+	log.Println(string(resBody))	
+	addwo.Name = i.Name
+	addwo.Time = delay / 2
+	send.ToWorkers = append(send.ToWorkers,addwo)
+	}
+	
+	reqBody, err := json.Marshal(send)
+	if err != nil {
+		w.AddError(err)
+	}
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/workers/response", w.MasterInfo.URL.String()), bytes.NewReader(reqBody))
+	if err != nil {
+		w.AddError(err)
+	}
+	if _, err := client.Do(req); err != nil {
+		w.AddError(errors.New(fmt.Sprintf(err.Error())))
+	}
+	}
+}
 
-func (w *Worker) requestDoStep(ctx context.Context, workflowID string, step *domain.Step, body []byte) error {
+func (w *Worker) requestDoStep(ctx context.Context, workflowID string,   step *domain.Step, body []byte) error {
 	c := http.DefaultClient
 	u := *w.MasterInfo.URL
-	u.Path = fmt.Sprintf("/workflows/%s/steps/%s/worker", workflowID, step.ID)
-	u.Query().Set("previousJobWorkerID", w.ID)
+	u.Path = fmt.Sprintf("/workflows/%s/steps/%s/worker/%s", workflowID, step.ID, w.ID)
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return err
@@ -314,15 +430,92 @@ func (w *Worker) requestDoStep(ctx context.Context, workflowID string, step *dom
 	if err := json.NewDecoder(resp.Body).Decode(&wk); err != nil {
 		return err
 	}
-
+	wkr := &Content{}
+	if err = json.Unmarshal(body, wkr); err != nil {
+		return err
+		
+	}
+	rbody := wkr.Body
+	log.Println(string(rbody))
+	
 	wkURL := fmt.Sprintf("%s/workflows/%s/steps/%s", wk.URL, workflowID, step.ID)
-	req, err = http.NewRequest(http.MethodPost, wkURL, bytes.NewReader(body))
+	req, err = http.NewRequest(http.MethodPost, wkURL, bytes.NewReader(rbody))
 	if err != nil {
 		return err
 	}
-	if _, err := c.Do(req); err != nil {
+	if  wk.ID != w.ID{
+	start := time.Now()
+	resp2, _ := c.Do(req)
+	delay := time.Since(start)
+	var resBody WorkerResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&resBody); err != nil {
 		return err
 	}
+    	
+    	
+	info := &api.DelayInfo {
+	JobName:      nowstep.Name,
+	FromWorkerID: w.ID,
+	ToWorkerName: wk.Name,
+	RAM:          wkr.RAM,
+	CPU:          wkr.CPU,
+	Runtime:      wkr.Runtime,
+	Time:         delay,
+	}
+		reqBody, err := json.Marshal(&info)
+		
+		if err != nil {
+		return  err
+	}
+
+	u.Path = fmt.Sprintf("/delayinfo")
+	
+	req2, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(reqBody))
+	if err != nil {
+		return  err
+	}
+	_, err = c.Do(req2)
+	if err != nil {
+		return  err
+	}
+	}
+	if wk.ID == w.ID{
+	var ded time.Duration = 0
+    	
+	info := &api.DelayInfo {
+	JobName:      nowstep.Name,
+	FromWorkerID: w.ID,
+	ToWorkerName: wk.Name,
+	RAM:          wkr.RAM,
+	CPU:          wkr.CPU,
+	Runtime:      wkr.Runtime,
+	Time:         ded,
+	}
+		reqBody2, err := json.Marshal(&info)
+		
+		if err != nil {
+		return  err
+	}
+
+	u.Path = fmt.Sprintf("/delayinfo")
+	
+	req2, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(reqBody2))
+	if err != nil {
+		return  err
+	}
+	_, err = c.Do(req2)
+	if err != nil {
+		return  err
+	}
+	wkURL = fmt.Sprintf("%s/workflows/%s/steps/%s", wk.URL, workflowID, step.ID)
+	req, err = http.NewRequest(http.MethodPost, wkURL, bytes.NewReader(rbody))
+	_, err = c.Do(req)
+	if err != nil {
+		return  err
+	}
+
+	}
+	
 	return nil
 }
 
@@ -367,7 +560,13 @@ func (w *Worker) RunJob(ctx context.Context, workflowID, stepID string, body []b
 	if err != nil {
 		return err
 	}
+	start := time.Now()
 	go j.Do(context.Background(), jobID, body)
+	time1 := time.Since(start)
+	log.Println("run job is finished.......")
+	log.Println(time.Now())
+	log.Println(time1)
+	
 	return nil
 }
 
@@ -460,6 +659,7 @@ func (w *Worker) FailJob(ctx context.Context, workflowID, stepID, jobID string, 
 	if err := w.JobStore.DeleteRunningJob(ctx, jobID); err != nil {
 		return err
 	}
+	
 	w.AddError(errors.New(string(body)))
 	wf, err := w.WorkflowStore.Get(ctx, workflowID)
 	if err != nil {
