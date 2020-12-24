@@ -27,9 +27,11 @@ func NewServer(w *worker.Worker) Server {
 	}
 }
 
+
 func (s *server) Serve() error {
 	r := chi.NewRouter()
 	r.Post("/workflows/{workflowID}/steps/{stepID}", s.jobDeployed)
+	r.Get("/hello", s.hello)
 	r.Post("/workflows/{workflowID}/steps/{stepID}/next", s.next)
 	r.Post("/workflows/{workflowID}/steps/{stepID}/fail", s.fail)
 	r.Post("/workflows/{workflowID}/steps/{stepID}/finish", s.finish)
@@ -38,24 +40,46 @@ func (s *server) Serve() error {
 	log.Println("Serving...")
 	return http.ListenAndServe(":2317", r)
 }
+func getBody(r *http.Request) (buf []byte, err error) {
+	buf, err = ioutil.ReadAll(r.Body)
+	defer func() { _ = r.Body.Close() }()
+	return
+}
 
 func (s *server) next(w http.ResponseWriter, r *http.Request) {
 	// workflowみて、次の処理へ飛ばす
 	workflowID := chi.URLParam(r, "workflowID")
 	stepID := chi.URLParam(r, "stepID")
 	jobID := r.Header.Get("takuhai-job-id")
-	body, err := ioutil.ReadAll(r.Body)
+	buf, err := getBody(r)
+	if err != nil{
+		log.Println(err)}
+	
+	/*wkr := &Content{}
+	if err := json.Unmarshal(buf, wkr); err != nil {
+		sendResponse(w, http.StatusBadRequest, nil)
+		return err
+	}
+	body := wkr.Body
+	log.Println(body)
+	log.Println(wkr.Runtime)
+	log.Println(wkr.RAM)*/
+	/*body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
 		return
-	}
+	}*/
 	go func() {
-		if err := s.workerService.NextJob(context.Background(), workflowID, stepID, jobID, body); err != nil {
+		if err := s.workerService.NextJob(context.Background(), workflowID, stepID, jobID, buf); err != nil {
 			log.Println(err)
 		}
 	}()
 	w.WriteHeader(200)
+}
+func (s *server) hello(w http.ResponseWriter, r *http.Request) {
+	log.Println("hello come on!")
+	
 }
 
 // jobがデプロイされたのをjob側から通知してもらう
